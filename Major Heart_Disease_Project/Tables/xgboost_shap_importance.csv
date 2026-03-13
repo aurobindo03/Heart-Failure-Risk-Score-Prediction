@@ -1,0 +1,23 @@
+feature,shap_importance,rank
+id,1.691584,1
+ca,0.4344854,2
+oldpeak,0.3695166,3
+cp_atypical angina,0.33227578,4
+cp_non-anginal,0.29767364,5
+sex_Male,0.24138446,6
+exang_True,0.23840767,7
+thalch,0.23157527,8
+thal_reversable defect,0.21948257,9
+chol,0.2139758,10
+slope_flat,0.20366384,11
+age,0.18191385,12
+trestbps,0.14201994,13
+slope_upsloping,0.103362896,14
+cp_typical angina,0.083127424,15
+dataset_VA Long Beach,0.07493265,16
+restecg_normal,0.03975871,17
+thal_normal,0.025772082,18
+fbs_True,0.012306886,19
+dataset_Switzerland,0.007894967,20
+restecg_st-t abnormality,0.00516843,21
+dataset_Hungary,0.004811005,22

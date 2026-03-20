@@ -1,0 +1,19 @@
+feature,domain_priority
+age,0.8
+sex_Male,0.4
+cp_atypical angina,1.0
+cp_non-anginal,1.0
+cp_typical angina,1.0
+trestbps,0.85
+chol,0.75
+fbs_True,0.5
+restecg_normal,0.6
+restecg_st-t abnormality,0.6
+thalch,0.8
+exang_True,0.95
+oldpeak,0.95
+slope_flat,0.9
+slope_upsloping,0.9
+ca,0.95
+thal_normal,0.9
+thal_reversable defect,0.9

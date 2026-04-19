@@ -433,7 +433,7 @@ def generate_cf():
         # -----------------
         cf = dice.generate_counterfactuals(
             query,
-            total_CFs=5,
+            total_CFs=3,
             desired_class=0,
             features_to_vary=features_to_vary,
             permitted_range=permitted_range

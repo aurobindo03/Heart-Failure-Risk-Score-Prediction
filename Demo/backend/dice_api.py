@@ -1,10 +1,12 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import pandas as pd
 import joblib
 import dice_ml
 from dice_ml import Dice
 
 app = Flask(__name__)
+CORS(app)
 
 # ======================
 # LOAD DATA + MODEL
@@ -47,12 +49,12 @@ permitted_range = {
 @app.route("/counterfactual", methods=["POST"])
 def generate_cf():
     try:
-        data = request.json
+        data = request.get_json()
 
-        # -----------------
-        # 1. CHECK HRS RISK
-        # -----------------
-        hrs_risk = data.get("risk")  # from your hrs.js
+        if not data:
+            return jsonify({"error": "No input data provided"}), 400
+
+        hrs_risk = data.get("risk")
 
         if hrs_risk != "High":
             return jsonify({
@@ -61,7 +63,7 @@ def generate_cf():
             })
 
         # -----------------
-        # 2. INPUT → DF
+        # INPUT → DF
         # -----------------
         query = pd.DataFrame([data])
 
@@ -75,19 +77,25 @@ def generate_cf():
         query = query[X.columns]
 
         # -----------------
-        # 3. FEATURES FROM SHAP (OPTIONAL)
+        # FEATURES TO VARY
         # -----------------
         features_to_vary = data.get("top_features", [])
+
+        if not isinstance(features_to_vary, list):
+            features_to_vary = []
 
         if not features_to_vary:
             features_to_vary = features_to_vary_default
 
+        # keep only valid columns
+        features_to_vary = [f for f in features_to_vary if f in X.columns]
+
         # -----------------
-        # 4. DICE GENERATION
+        # DICE GENERATION
         # -----------------
         cf = dice.generate_counterfactuals(
             query,
-            total_CFs=5,   # 👈 FIVE recommendations
+            total_CFs=5,
             desired_class=0,
             features_to_vary=features_to_vary,
             permitted_range=permitted_range
@@ -102,7 +110,7 @@ def generate_cf():
             })
 
         # -----------------
-        # 5. FORMAT OUTPUT
+        # FORMAT OUTPUT
         # -----------------
         results = []
 
@@ -126,18 +134,18 @@ def generate_cf():
                 "changes": changes
             })
 
-        # -----------------
-        # FINAL RESPONSE
-        # -----------------
         return jsonify({
             "total_recommendations": len(results),
             "counterfactuals": results
         })
 
     except Exception as e:
-        print("ERROR:", e)
-        return jsonify({"error": str(e)})
+        print("ERROR:", str(e))
+        return jsonify({"error": str(e)}), 500
 
 
+# ======================
+# RUN SERVER
+# ======================
 if __name__ == "__main__":
-    app.run(port=6000)
+    app.run(host="0.0.0.0", port=8000, debug=True)

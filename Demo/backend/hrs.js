@@ -1,8 +1,8 @@
-import express from "express";
 import config from "./hrs_config.json" assert { type: "json" };
 
-const router = express.Router();
-
+// ======================
+// ONE HOT ENCODE
+// ======================
 function oneHotEncode(input) {
   return {
     age: input.age,
@@ -26,21 +26,25 @@ function oneHotEncode(input) {
   };
 }
 
-router.post("/", (req, res) => {
-  console.log("HRS endpoint hit!", req.body);
-  const encoded = oneHotEncode(req.body);
+// ======================
+// MAIN FUNCTION (NEW)
+// ======================
+export function calculateHRS(input) {
+  const encoded = oneHotEncode(input);
 
   const contributions = {};
-let score = 0;
+  let score = 0;
 
-for (const feature of config.features) {
-  const min = config.scaler_min[feature];
-  const max = config.scaler_max[feature];
-  const scaled = (encoded[feature] - min) / (max - min);
-  const contribution = scaled * config.hrs_weights[feature];
-  contributions[feature] = parseFloat(contribution.toFixed(4));
-  score += contribution;
-}
+  for (const feature of config.features) {
+    const min = config.scaler_min[feature];
+    const max = config.scaler_max[feature];
+
+    const scaled = (encoded[feature] - min) / (max - min);
+    const contribution = scaled * config.hrs_weights[feature];
+
+    contributions[feature] = parseFloat(contribution.toFixed(4));
+    score += contribution;
+  }
 
   const risk =
     score < config.thresholds.low ? "Low" :
@@ -49,11 +53,14 @@ for (const feature of config.features) {
   const actionableFeatures = ['trestbps', 'oldpeak', 'thalch', 'chol', 'ca'];
 
   const topFeatures = Object.entries(contributions)
-  .filter(([feature]) => actionableFeatures.includes(feature))
-  .sort((a, b) => b[1] - a[1])
-  .map(([feature, value]) => ({ feature, value }));
+    .filter(([feature]) => actionableFeatures.includes(feature))
+    .sort((a, b) => b[1] - a[1])
+    .map(([feature, value]) => ({ feature, value }));
 
-  res.json({ hrs_score: parseFloat(score.toFixed(4)), risk, contributions, top_features: topFeatures });
-});
-
-export default router;
+  return {
+    hrs_score: parseFloat(score.toFixed(4)),
+    risk,
+    contributions,
+    top_features: topFeatures
+  };
+}

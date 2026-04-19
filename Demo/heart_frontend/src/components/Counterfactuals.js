@@ -1,17 +1,22 @@
 const labels = {
-  bp: "Blood Pressure",
+  trestbps: "Blood Pressure",
   oldpeak: "ST Depression",
-  thalach: "Heart Rate",
+  thalch: "Heart Rate",
+  chol: "Cholesterol",
+  ca: "Major Vessels",
 };
 
 function Counterfactuals({ data }) {
+  if (!data || data.length === 0) return null;
+
   return (
     <div style={box}>
       <h3>Recommended Changes</h3>
 
       {data.map((c, i) => (
         <p key={i}>
-          Reduce <b>{labels[c.feature]}</b> from {c.from} → {c.to}
+          {c.to > c.from ? "Increase" : "Decrease"}{" "}
+          <b>{labels[c.feature] || c.feature}</b> from {c.from} → {c.to}
         </p>
       ))}
     </div>

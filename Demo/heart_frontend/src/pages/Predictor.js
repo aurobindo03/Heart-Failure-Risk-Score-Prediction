@@ -9,20 +9,23 @@ function Predictor() {
   const [result, setResult] = useState(null);
 
   const analyzePatient = async (data) => {
-  try {
-    const res = await axios.post("http://localhost:5000/api/hrs", data);
-    console.log(res.data);
-    setResult({
-      risk_score: res.data.hrs_score,
-      risk_level: res.data.risk,
-      top_features: res.data.top_features,
-      counterfactuals: []
-    });
-  } catch (err) {
-    console.error(err);
-    alert("Something went wrong.");
-  }
-};
+    try {
+      // ✅ ONLY call Express
+      const res = await axios.post("http://localhost:5000/analyze", data);
+
+      const response = res.data;
+
+      setResult({
+        risk_score: response.risk_score,
+        risk_level: response.risk_level,
+        top_features: response.top_features,
+        counterfactuals: response.counterfactuals?.counterfactuals || []
+      });
+
+    } catch (err) {
+      console.error("Error:", err);
+    }
+  };
 
   return (
     <div>
@@ -32,7 +35,10 @@ function Predictor() {
         <>
           <ResultCard data={result} />
           <SHAPInsights features={result.top_features} />
-          <Counterfactuals data={result.counterfactuals} />
+
+          {result.counterfactuals.length > 0 && (
+            <Counterfactuals data={result.counterfactuals} />
+          )}
         </>
       )}
     </div>

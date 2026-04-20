@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS # type: ignore
+from flask_cors import CORS
 import pandas as pd
 import joblib
 import dice_ml
@@ -16,18 +16,16 @@ df = pd.read_csv("cleaned_train.csv")
 TARGET = "target"
 X = df.drop(columns=[TARGET])
 
-# Model for counterfactuals
 rf = joblib.load("rf_model.pkl")
-
-# Model for risk probability (IMPORTANT)
 catboost_model = joblib.load("catboost_model.pkl")
+
 
 def predict_proba(model, df):
     return model.predict_proba(df)[:, 1]
 
 
 # ======================
-# DICE SETUP
+# DICE SETUP (GENETIC)
 # ======================
 data_dice = dice_ml.Data(
     dataframe=df,
@@ -36,19 +34,30 @@ data_dice = dice_ml.Data(
 )
 
 model_dice = dice_ml.Model(model=rf, backend="sklearn")
-dice = Dice(data_dice, model_dice)
+dice = Dice(data_dice, model_dice, method="genetic")
+
 
 # ======================
 # SETTINGS
 # ======================
-features_to_vary_default = ['trestbps', 'oldpeak', 'thalch', 'chol', 'ca']
-
 permitted_range = {
-    'trestbps': [80, 200],
-    'oldpeak': [0, 6],
-    'thalch': [60, 200],
-    'chol': [100, 400],
-    'ca': [0, 3]
+    'trestbps': [60, 220],
+    'oldpeak': [0, 7],
+    'thalch': [50, 210],
+    'chol': [80, 500],
+    'ca': [0, 4]
+}
+
+# important features only (clean output)
+important_features = ['oldpeak', 'thalch', 'ca', 'chol', 'trestbps']
+
+# clamp unrealistic values
+MAX_CHANGE = {
+    "thalch": 30,
+    "chol": 50,
+    "trestbps": 30,
+    "oldpeak": 2,
+    "ca": 2
 }
 
 # ======================
@@ -60,13 +69,10 @@ def generate_cf():
         data = request.get_json()
 
         if not data:
-            return jsonify({"error": "No input data provided"}), 400
+            return jsonify({"error": "No input data"}), 400
 
         if data.get("risk") != "High":
-            return jsonify({
-                "message": "Counterfactuals only for high-risk patients",
-                "counterfactuals": []
-            })
+            return jsonify({"counterfactuals": []})
 
         # -----------------
         # CLEAN INPUT
@@ -74,11 +80,9 @@ def generate_cf():
         clean_data = {k: v for k, v in data.items() if k in X.columns}
         query = pd.DataFrame([clean_data])
 
-        # Fix naming mismatch
         if "thalach" in query.columns:
             query.rename(columns={"thalach": "thalch"}, inplace=True)
 
-        # Ensure all columns exist
         for col in X.columns:
             if col not in query.columns:
                 query[col] = 0
@@ -86,110 +90,109 @@ def generate_cf():
         query = query[X.columns]
 
         # -----------------
-        # FEATURES TO VARY
-        # -----------------
-        features_to_vary = data.get("top_features", [])
-
-        if not isinstance(features_to_vary, list):
-            features_to_vary = []
-
-        if not features_to_vary:
-            features_to_vary = features_to_vary_default
-
-        features_to_vary = [f for f in features_to_vary if f in X.columns]
-
-        # -----------------
         # GENERATE CFs
         # -----------------
         cf = dice.generate_counterfactuals(
             query,
-            total_CFs=3,
+            total_CFs=10,              # 🔥 ensures diversity
             desired_class=0,
-            features_to_vary=features_to_vary,
-            permitted_range=permitted_range
+            features_to_vary="all",
+            permitted_range=permitted_range,
+            diversity_weight=1.0
         )
 
         cf_list = cf.cf_examples_list[0].final_cfs_df
 
         if cf_list is None or cf_list.empty:
-            return jsonify({
-                "message": "No counterfactuals found",
-                "counterfactuals": []
-            })
+            return jsonify({"counterfactuals": []})
 
         # -----------------
-        # COMPUTE RISK
+        # RISK
         # -----------------
-        original_prob = predict_proba(catboost_model, query)[0]
+        original_prob = float(predict_proba(catboost_model, query)[0])
 
         results = []
-        seen_global_changes = set()
 
         for i in range(len(cf_list)):
             cf_instance = cf_list.iloc[[i]]
-            cf_prob = predict_proba(catboost_model, cf_instance)[0]
+            cf_instance = cf_instance[X.columns]
 
-            risk_reduction = ((original_prob - cf_prob) / original_prob) * 100
+            cf_prob = float(predict_proba(catboost_model, cf_instance)[0])
+
+            risk_reduction = 0 if original_prob == 0 else (
+                (original_prob - cf_prob) / original_prob
+            ) * 100
 
             changes = []
 
-            for col in features_to_vary:
-                original_val = query.iloc[0][col]
-                new_val = cf_instance.iloc[0][col]
+            for col in important_features:
+                original_val = float(query.iloc[0][col])
+                new_val = float(cf_instance.iloc[0][col])
                 diff = new_val - original_val
 
                 if abs(diff) > 0.1:
-                    change_key = (col, round(new_val, 2))
+                    max_allowed = MAX_CHANGE.get(col, 50)
 
-                    # remove repeated global suggestions
-                    if change_key in seen_global_changes:
-                        continue
-                    seen_global_changes.add(change_key)
-
-                    # skip unrealistic suggestions
-                    if col == "trestbps" and new_val > original_val:
-                        continue
+                    if abs(diff) > max_allowed:
+                        diff = max_allowed if diff > 0 else -max_allowed
 
                     changes.append({
                         "feature": col,
                         "change": "increase" if diff > 0 else "decrease",
-                        "amount": round(abs(diff), 2)
+                        "amount": float(round(abs(diff), 2))
                     })
 
             if not changes:
                 continue
 
-            # narrative explanation
-            changes_text = []
-            for c in changes:
-                direction = "increase" if c["change"] == "increase" else "decrease"
-                changes_text.append(f"{c['feature']} {direction} by {c['amount']}")
-
             explanation = (
                 f"Risk {original_prob:.2f} → {cf_prob:.2f} "
-                f"({risk_reduction:.1f}% reduction) if "
-                + ", ".join(changes_text)
+                f"({risk_reduction:.1f}% ↓)"
             )
 
             results.append({
-                "recommendation": i + 1,
-                "original_risk": round(original_prob, 2),
-                "new_risk": round(cf_prob, 2),
-                "risk_reduction": round(risk_reduction, 2),
+                "recommendation": int(i + 1),
+                "original_risk": float(round(original_prob, 2)),
+                "new_risk": float(round(cf_prob, 2)),
+                "risk_reduction": float(round(risk_reduction, 2)),
                 "changes": changes,
                 "explanation": explanation
             })
 
-        # sort best first
-        results.sort(key=lambda x: x["risk_reduction"], reverse=True)
+        # -----------------
+        # REMOVE DUPLICATES
+        # -----------------
+        unique_results = []
+        seen = set()
+
+        for r in results:
+            key = (
+                round(r["new_risk"], 4),
+                tuple(sorted(
+                    (c["feature"], c["change"], round(c["amount"], 2))
+                    for c in r["changes"]
+                ))
+            )
+
+            if key not in seen:
+                seen.add(key)
+                unique_results.append(r)
+
+        # -----------------
+        # SORT & TAKE TOP 3
+        # -----------------
+        unique_results.sort(key=lambda x: x["risk_reduction"], reverse=True)
+        unique_results = unique_results[:3]
 
         return jsonify({
-            "total_recommendations": len(results),
-            "counterfactuals": results
+            "total_recommendations": len(unique_results),
+            "counterfactuals": unique_results
         })
 
     except Exception as e:
-        print("ERROR:", str(e))
+        import traceback
+        print("\n🔥 ERROR:\n")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
@@ -198,3 +201,4 @@ def generate_cf():
 # ======================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
+    
